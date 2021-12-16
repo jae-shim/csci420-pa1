@@ -31,8 +31,8 @@ else
   PLATFORM=Mac OS
   INCLUDE=-I../external/glm/ -I$(LIB_CODE_BASE) -I../external/imageIO -I../external/jpeg-9a-mac/include
   LIB=-framework OpenGL -framework GLUT ../external/jpeg-9a-mac/lib/libjpeg.a -lstdc++
-  CXXFLAGS+= -Wno-deprecated-declarations
-  LDFLAGS=-Wl,-w
+  CXXFLAGS+= -Wno-deprecated-declarations -target x86_64-apple-darwin21.1.0
+  LDFLAGS=-Wl,-w -target x86_64-apple-darwin21.1.0
 endif
 
 all: $(TARGET)

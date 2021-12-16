@@ -1,0 +1,6 @@
+make --dry-run --always-make --keep-going --print-directory
+make: Entering directory `/Users/jaeshim/Documents/CSCI 420/Programming Assignments/PA1'
+make: Leaving directory `/Users/jaeshim/Documents/CSCI 420/Programming Assignments/PA1'
+ 
+make: *** No targets specified and no makefile found.  Stop.
+ 

@@ -63,6 +63,7 @@ std::vector<glm::vec3> heightField;
 std::vector<glm::vec4> grayScale;
 
 GLenum mode = GL_POINTS;
+GLsizei vertices;
 
 // write a screenshot to the specified filename
 void saveScreenshot(const char * filename)
@@ -88,7 +89,7 @@ void displayFunc()
 
   matrix.SetMatrixMode(OpenGLMatrix::ModelView);
   matrix.LoadIdentity();
-  matrix.LookAt(imageWidth / 2, 100, imageHeight / 2, imageWidth / 2, 0, -imageHeight / 2, 0, 0, -1);
+  matrix.LookAt(imageWidth / 2, (imageHeight + imageWidth) / 4, -imageHeight / 2, imageWidth / 2, 0, imageHeight / 2, 0, 0, 1);
   //matrix.LookAt(0, 100, imageHeight / 2, 0, 0, -imageHeight / 2, 0, 0, -1);
 
   float m[16];
@@ -117,7 +118,7 @@ void displayFunc()
   glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, 0, (const void *)0);
 
   glBindVertexArray(vertexArray);
-  glDrawArrays(mode, 0, heightField.size());
+  glDrawArrays(mode, 0, vertices);
 
   glDisableVertexAttribArray(0);
   glDisableVertexAttribArray(1);
@@ -274,14 +275,16 @@ void keyboardFunc(unsigned char key, int x, int y)
 
     case '1':
       mode = GL_POINTS;
+      vertices = imageHeight * imageWidth;
     break;
 
     case '2':
-      mode = GL_LINES;
+      mode = GL_LINE_STRIP;
+      vertices = heightField.size();
     break;
 
     case '3':
-      mode = GL_TRIANGLES;
+      mode = GL_TRIANGLE_STRIP;
     break;
   }
 }
@@ -298,31 +301,44 @@ void initScene(int argc, char *argv[])
 
   glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
   
-  imageWidth = heightmapImage->getWidth();
   imageHeight = heightmapImage->getHeight();
+  imageWidth = heightmapImage->getWidth();
 
-  heightField.reserve(imageWidth * imageHeight);
-  grayScale.reserve(imageWidth * imageHeight);
+  vertices = imageHeight * imageWidth;
+
+  heightField.resize((imageHeight + 1) * imageWidth * 2);
+  grayScale.resize((imageHeight + 1) * imageWidth * 2);
   
-  for(int i = 0; i < imageWidth; i++)
+  for(int i = 0; i <= imageHeight; i++)
   {
-    for(int j = 0; j < imageHeight; j++)
+    for(int j = 0; j < imageWidth; j++)
     {
-      float height = heightmapImage->getPixel(i, j, 0) / 255.0f;
+      int x = min(i, imageHeight - 1);
+      int y = i % 2 ? imageWidth - j - 1 : j;
 
-      heightField.push_back(glm::vec3(i, 10.0f * height, -j));
+      float height = heightmapImage->getPixel(x, y, 0) / 256.0f;
 
-      grayScale.push_back(glm::vec4(height, height, height, 1.0f));
+      int index = i * imageHeight + j;
+
+      heightField[index] = glm::vec3(x, 20.0f * height, y);
+
+      grayScale[index] = glm::vec4(height, height, height, 1.0f);
+
+      height = heightmapImage->getPixel(y, x, 0) / 256.0f;
+
+      heightField[heightField.size() - index - 1] = glm::vec3(y, 20.0f * height, x);
+
+      grayScale[heightField.size() - index - 1] = glm::vec4(height, height, height, 1.0f);
     }
   }
 
   glGenBuffers(1, &positionVertexBuffer);
   glBindBuffer(GL_ARRAY_BUFFER, positionVertexBuffer);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * imageHeight * imageWidth, &heightField[0], GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * heightField.size(), &heightField[0], GL_STATIC_DRAW);
 
   glGenBuffers(1, &colorVertexBuffer);
   glBindBuffer(GL_ARRAY_BUFFER, colorVertexBuffer);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec4) * imageHeight * imageWidth, &grayScale[0], GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec4) * heightField.size(), &grayScale[0], GL_STATIC_DRAW);
 
   pipelineProgram = new BasicPipelineProgram;
   int ret = pipelineProgram->Init(shaderBasePath);

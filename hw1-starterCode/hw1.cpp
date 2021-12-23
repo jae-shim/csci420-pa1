@@ -62,8 +62,88 @@ BasicPipelineProgram * pipelineProgram;
 std::vector<glm::vec3> heightField;
 std::vector<glm::vec4> grayScale;
 
-GLenum mode = GL_POINTS;
+GLenum mode;
 GLsizei vertices;
+
+GLuint triPositionVertexBuffer, triColorVertexBuffer;
+GLuint triVertexArray;
+
+std::vector<glm::vec3> triHeightField;
+std::vector<glm::vec4> triGrayScale;
+
+GLboolean smooth;
+
+GLuint triPositionNeighborsVertexBuffer;
+
+std::vector<glm::vec4> triNeighborsHeightField;
+
+void generateVertexBufferObjects()
+{
+  heightField.resize((imageHeight + 1) * imageWidth * 2);
+  grayScale.resize((imageHeight + 1) * imageWidth * 2);
+
+  triHeightField.resize((imageHeight - 1) * imageWidth * 2);
+  triGrayScale.resize((imageHeight - 1) * imageWidth * 2);
+
+  triNeighborsHeightField.resize((imageHeight - 1) * imageWidth * 2);
+
+  int index = 0;
+  
+  for(int i = 0; i <= imageHeight; i++)
+  {
+    for(int j = 0; j < imageWidth; j++, index++)
+    {
+      int x = min(i, imageHeight - 1);
+      int y = i % 2 ? imageWidth - j - 1 : j;
+
+      float height = heightmapImage->getPixel(x, y, 0) / 256.0f;
+
+      // Points/Lines
+      {
+        heightField[index] = glm::vec3(x, 20.0f * height, y);
+
+        grayScale[index] = glm::vec4(height, height, height, 1.0f);
+
+        float reverseHeight = heightmapImage->getPixel(y, x, 0) / 256.0f;
+
+        heightField[heightField.size() - index - 1] = glm::vec3(y, 20.0f * reverseHeight, x);
+
+        grayScale[heightField.size() - index - 1] = glm::vec4(reverseHeight, reverseHeight, reverseHeight, 1.0f);
+      }
+
+      // Triangles
+      if(i < imageHeight - 1)
+      {
+        triHeightField[index * 2] = glm::vec3(x, 20.0f * height, y);
+
+        triGrayScale[index * 2] = glm::vec4(height, height, height, 1.0f);
+
+        height = heightmapImage->getPixel(x + 1, y, 0) / 256.0f;
+
+        triHeightField[index * 2 + 1] = glm::vec3(x + 1, 20.0f * height, y);
+
+        triGrayScale[index * 2 + 1] = glm::vec4(height, height, height, 1.0f);
+
+        // Smoothened Triangles
+        {
+          glm::vec4& neighborsOne = triNeighborsHeightField[index * 2];
+          glm::vec4& neighborsTwo = triNeighborsHeightField[index * 2 + 1];
+
+          neighborsOne[0] = heightmapImage->getPixel(x, y + (y == 0 ? 1 : -1), 0) / 256.0f;
+          neighborsOne[1] = heightmapImage->getPixel(x, y + (y == imageWidth - 1 ? -1 : 1), 0) / 256.0f;
+          neighborsOne[2] = heightmapImage->getPixel(x + 1, y, 0) / 256.0f;
+          neighborsOne[3] = heightmapImage->getPixel(x + (x == 0 ? 1 : -1), y, 0) / 256.0f;
+
+          neighborsTwo[0] = heightmapImage->getPixel(x + 1, y + (y == 0 ? 1 : -1), 0) / 256.0f;
+          neighborsTwo[1] = heightmapImage->getPixel(x + 1, y + (y == imageWidth - 1 ? -1 : 1), 0) / 256.0f;
+          neighborsTwo[2] = heightmapImage->getPixel(x + 1 + (x == imageHeight - 1 ? -1 : 1), y, 0) / 256.0f;
+          neighborsTwo[3] = heightmapImage->getPixel(x, y, 0) / 256.0f;
+
+        }
+      }
+    }
+  }
+}
 
 // write a screenshot to the specified filename
 void saveScreenshot(const char * filename)
@@ -92,6 +172,13 @@ void displayFunc()
   matrix.LookAt(imageWidth / 2, (imageHeight + imageWidth) / 4, -imageHeight / 2, imageWidth / 2, 0, imageHeight / 2, 0, 0, 1);
   //matrix.LookAt(0, 100, imageHeight / 2, 0, 0, -imageHeight / 2, 0, 0, -1);
 
+  // Transform
+  matrix.Translate(landTranslate[0], landTranslate[1], landTranslate[2]);
+  matrix.Rotate(landRotate[0], 1.0f, 0.0f, 0.0f);
+  matrix.Rotate(landRotate[1], 0.0f, 1.0f, 0.0f);
+  matrix.Rotate(landRotate[2], 0.0f, 0.0f, 1.0f);
+  matrix.Scale(landScale[0], landScale[1], landScale[2]);
+
   float m[16];
   matrix.SetMatrixMode(OpenGLMatrix::ModelView);
   matrix.GetMatrix(m);
@@ -106,18 +193,26 @@ void displayFunc()
   // set variable
   pipelineProgram->SetModelViewMatrix(m);
   pipelineProgram->SetProjectionMatrix(p);
+  pipelineProgram->SetMode(smooth);
 
-  glBindBuffer(GL_ARRAY_BUFFER, positionVertexBuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, (mode != GL_TRIANGLE_STRIP) ? positionVertexBuffer : triPositionVertexBuffer);
   GLuint loc = glGetAttribLocation(pipelineProgram->GetProgramHandle(), "position");
   glEnableVertexAttribArray(loc);
   glVertexAttribPointer(loc, 3, GL_FLOAT, GL_FALSE, 0, (const void *)0);
 
-  glBindBuffer(GL_ARRAY_BUFFER, colorVertexBuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, (mode != GL_TRIANGLE_STRIP) ? colorVertexBuffer : triColorVertexBuffer);
   loc = glGetAttribLocation(pipelineProgram->GetProgramHandle(), "color");
   glEnableVertexAttribArray(loc);
   glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, 0, (const void *)0);
 
-  glBindVertexArray(vertexArray);
+  if(smooth)
+  {
+    glBindBuffer(GL_ARRAY_BUFFER, triPositionNeighborsVertexBuffer);
+    loc = glGetAttribLocation(pipelineProgram->GetProgramHandle(), "positionNeighbors");
+    glEnableVertexAttribArray(loc);
+    glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, 0, (const void *)0);
+  }
+
   glDrawArrays(mode, 0, vertices);
 
   glDisableVertexAttribArray(0);
@@ -142,7 +237,7 @@ void reshapeFunc(int w, int h)
 
   matrix.SetMatrixMode(OpenGLMatrix::Projection);
   matrix.LoadIdentity();
-  matrix.Perspective(54.0f, (float)w / (float)h, 0.01f, 1000000.0f);
+  matrix.Perspective(54.0f, (float)w / (float)h, 0.01f, 1000.0f);
   matrix.SetMatrixMode(OpenGLMatrix::ModelView);
 }
 
@@ -276,15 +371,29 @@ void keyboardFunc(unsigned char key, int x, int y)
     case '1':
       mode = GL_POINTS;
       vertices = imageHeight * imageWidth;
+      smooth = false;
     break;
 
     case '2':
       mode = GL_LINE_STRIP;
       vertices = heightField.size();
+      smooth = false;
     break;
 
     case '3':
       mode = GL_TRIANGLE_STRIP;
+      vertices = triHeightField.size();
+      smooth = false;
+    break;
+
+    case '4':
+      mode = GL_TRIANGLE_STRIP;
+      vertices = triHeightField.size();
+      smooth = true;
+    break;
+
+    case 'z':
+      controlState = TRANSLATE;
     break;
   }
 }
@@ -304,33 +413,9 @@ void initScene(int argc, char *argv[])
   imageHeight = heightmapImage->getHeight();
   imageWidth = heightmapImage->getWidth();
 
-  vertices = imageHeight * imageWidth;
+  keyboardFunc('1', 0, 0);
 
-  heightField.resize((imageHeight + 1) * imageWidth * 2);
-  grayScale.resize((imageHeight + 1) * imageWidth * 2);
-  
-  for(int i = 0; i <= imageHeight; i++)
-  {
-    for(int j = 0; j < imageWidth; j++)
-    {
-      int x = min(i, imageHeight - 1);
-      int y = i % 2 ? imageWidth - j - 1 : j;
-
-      float height = heightmapImage->getPixel(x, y, 0) / 256.0f;
-
-      int index = i * imageHeight + j;
-
-      heightField[index] = glm::vec3(x, 20.0f * height, y);
-
-      grayScale[index] = glm::vec4(height, height, height, 1.0f);
-
-      height = heightmapImage->getPixel(y, x, 0) / 256.0f;
-
-      heightField[heightField.size() - index - 1] = glm::vec3(y, 20.0f * height, x);
-
-      grayScale[heightField.size() - index - 1] = glm::vec4(height, height, height, 1.0f);
-    }
-  }
+  generateVertexBufferObjects();
 
   glGenBuffers(1, &positionVertexBuffer);
   glBindBuffer(GL_ARRAY_BUFFER, positionVertexBuffer);
@@ -338,7 +423,19 @@ void initScene(int argc, char *argv[])
 
   glGenBuffers(1, &colorVertexBuffer);
   glBindBuffer(GL_ARRAY_BUFFER, colorVertexBuffer);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec4) * heightField.size(), &grayScale[0], GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec4) * grayScale.size(), &grayScale[0], GL_STATIC_DRAW);
+
+  glGenBuffers(1, &triPositionVertexBuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, triPositionVertexBuffer);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * triHeightField.size(), &triHeightField[0], GL_STATIC_DRAW);
+
+  glGenBuffers(1, &triColorVertexBuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, triColorVertexBuffer);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec4) * triGrayScale.size(), &triGrayScale[0], GL_STATIC_DRAW);
+
+  glGenBuffers(1, &triPositionNeighborsVertexBuffer);
+  glBindBuffer(GL_ARRAY_BUFFER, triPositionNeighborsVertexBuffer);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec4) * triNeighborsHeightField.size(), &triNeighborsHeightField[0], GL_STATIC_DRAW);
 
   pipelineProgram = new BasicPipelineProgram;
   int ret = pipelineProgram->Init(shaderBasePath);
@@ -346,6 +443,9 @@ void initScene(int argc, char *argv[])
 
   glGenVertexArrays(1, &vertexArray);
   glBindVertexArray(vertexArray);
+
+  glGenVertexArrays(1, &triVertexArray);
+  glBindVertexArray(triVertexArray);
 
   glEnable(GL_DEPTH_TEST);
 }
